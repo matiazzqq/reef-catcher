@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>DEEP ABYSS: Reef Catcher</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background:#001830;
+  overflow:hidden;
+  font-family:'Segoe UI',Arial,sans-serif;
+  color:#fff;
+  touch-action:none;
+  user-select:none;
+  -webkit-user-select:none;
+}
+canvas{display:block}
+
+#ui{
+  position:absolute;inset:0;
+  pointer-events:none;
+  z-index:10;
+  display:flex;flex-direction:column;
+  justify-content:space-between;
+  padding:14px;
+}
+.top-bar{
+  display:flex;justify-content:space-between;
+  flex-wrap:wrap;gap:8px;
+}
+.stat{
+  background:rgba(0,20,40,.7);
+  border:1px solid rgba(0,229,255,.3);
+  padding:8px 14px;
+  border-radius:10px;
+  font-size:15px;font-weight:bold;
+  backdrop-filter:blur(5px);
+}
+.stat span{color:#00e5ff}
+.stat.score span{color:#00ff9d}
+
+.bottom-hint{
+  text-align:center;
+  color:rgba(0,229,255,.4);
+  font-size:12px;
+  padding-bottom:4px;
+}
+
+.menu{
+  position:absolute;inset:0;
+  z-index:100;
+  background:radial-gradient(circle at 50% 40%, rgba(0,40,70,.75), rgba(0,10,25,.96) 70%);
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  text-align:center;padding:24px;
+  pointer-events:auto;
+  visibility:visible;opacity:1;
+  transition:opacity .25s;
+}
+.hidden{
+  visibility:hidden!important;
+  opacity:0!important;
+  pointer-events:none!important;
+}
+h1{
+  font-size:min(12vw,60px);
+  letter-spacing:3px;
+  color:#fff;
+  text-shadow:0 0 20px rgba(0,229,255,.6), 0 0 50px rgba(0,255,157,.3);
+  margin-bottom:10px;
+}
+p{
+  color:#a0d8e8;
+  font-size:16px;line-height:1.6;
+  margin-bottom:24px;max-width:520px;
+}
+.btn{
+  padding:15px 45px;
+  font-size:20px;font-weight:900;
+  border:none;outline:none;
+  border-radius:999px;
+  color:#002030;
+  background:linear-gradient(135deg,#00e5ff,#00ff9d);
+  box-shadow:0 10px 30px rgba(0,229,255,.35);
+  cursor:pointer;
+  transition:transform .18s;
+  pointer-events:auto;
+}
+.btn:hover{transform:scale(1.04)}
+.final-score{font-size:42px;color:#00ff9d;margin:16px 0}
+.stats-list{list-style:none;margin:0 0 22px;font-size:17px;color:#a0d8e8}
+.stats-list li{margin:6px 0}
+.stats-list span{color:#00e5ff;font-weight:900}
+.hint{margin-top:18px;font-size:13px;color:#5a8a9a}
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<div id="ui">
+  <div class="top-bar">
+    <div class="stat score">Очки: <span id="scoreVal">0</span></div>
+    <div class="stat">Поймано: <span id="catchVal">0</span></div>
+    <div class="stat"><span id="livesVal">❤️❤️❤️</span></div>
+    <div class="stat">⏱ <span id="timeVal">60</span>с</div>
+  </div>
+  <div class="bottom-hint">Двигай мышью или пальцем по вертикали. Лови рыбу, избегай акул и мин!</div>
+</div>
+
+<div id="startMenu" class="menu">
+  <h1>REEF CATCHER</h1>
+  <p>
+    Подводный мир DEEP ABYSS.<br><br>
+    Управляй глубиной крючка и лови рыбу.<br>
+    Чем глубже — тем ценнее улов, но опаснее хищники.<br><br>
+    Маленькая +10 | Средняя +20 | Иглобрюх +30<br>
+    Осьминог +100 | Золотая +200<br>
+    Акула и мина = потеря жизни!
+  </p>
+  <button class="btn" id="btnStart">ЗАБРОСИТЬ УДОЧКУ</button>
+  <div class="hint">Мышь / палец — глубина крючка. Стрелки вверх-вниз тоже работают.</div>
+</div>
+
+<div id="overMenu" class="menu hidden">
+  <h1>УЛОВ ГОТОВ</h1>
+  <div class="final-score" id="finalScore">0</div>
+  <ul class="stats-list">
+    <li>Поймано рыб: <span id="finalCatch">0</span></li>
+    <li>Макс. глубина: <span id="finalDepth">0</span>м</li>
+    <li>Лучший улов: <span id="bestCatch">0</span></li>
+  </ul>
+  <button class="btn" id="btnRestart">ЛОВИТЬ СНОВА</button>
+</div>
+
+<script>
+// ==== AUDIO ====
+let audioCtx=null;
+function initAudio(){
+  if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  if(audioCtx.state==='suspended')audioCtx.resume();
+}
+function tone(freq,type,dur,vol,delay){
+  if(!audioCtx)return;
+  delay=delay||0;
+  const t=audioCtx.currentTime+delay;
+  const o=audioCtx.createOscillator();
+  const g=audioCtx.createGain();
+  o.type=type;o.frequency.setValueAtTime(freq,t);
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+  o.connect(g);g.connect(audioCtx.destination);
+  o.start(t);o.stop(t+dur+0.05);
+}
+const SFX={
+  catch(){tone(700,'sine',0.1,0.1);tone(1050,'sine',0.12,0.08,0.06)},
+  big(){tone(600,'sine',0.15,0.09);tone(900,'sine',0.15,0.08,0.08);tone(1200,'sine',0.2,0.07,0.16)},
+  danger(){tone(200,'sawtooth',0.25,0.15)},
+  over(){tone(500,'sine',0.3,0.1);tone(350,'sine',0.3,0.1,0.2);tone(220,'sine',0.5,0.1,0.4)}
+};
+
+// ==== CANVAS ====
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+const PI2=Math.PI*2;
+let W=0,H=0;
+function resize(){
+  W=window.innerWidth;H=window.innerHeight;
+  canvas.width=W;canvas.height=H;
+  if(game){game.hookX=W*0.3;}
+}
+window.addEventListener('resize',resize);
+
+// ==== DOM ====
+const scoreVal=document.getElementById('scoreVal');
+const catchVal=document.getElementById('catchVal');
+const livesVal=document.getElementById('livesVal');
+const timeVal=document.getElementById('timeVal');
+const startMenu=document.getElementById('startMenu');
+const overMenu=document.getElementById('overMenu');
+const btnStart=document.getElementById('btnStart');
+const btnRestart=document.getElementById('btnRestart');
+const finalScore=document.getElementById('finalScore');
+const finalCatch=document.getElementById('finalCatch');
+const finalDepth=document.getElementById('finalDepth');
+const bestCatch=document.getElementById('bestCatch');
+
+// ==== РЫБЫ (векторные, НЕ эмодзи) ====
+const FISH_TYPES=[
+  {kind:'fish',color:'#4dd0e1',points:10,speed:1.5,size:24,danger:false,weight:5,depth:[0.2,0.7]},
+  {kind:'fish',color:'#ffb74d',points:20,speed:2,size:26,danger:false,weight:4,depth:[0.3,0.8]},
+  {kind:'fish',color:'#aed581',points:30,speed:2.5,size:28,danger:false,weight:3,depth:[0.4,0.9]},
+  {kind:'shark',color:'#90a4ae',points:0,speed:3,size:40,danger:true,weight:2,depth:[0.3,0.8]},
+  {kind:'mine',color:'#455a64',points:0,speed:1,size:22,danger:true,weight:1.5,depth:[0.5,0.95]},
+  {kind:'octo',color:'#ba68c8',points:100,speed:1.8,size:34,danger:false,weight:0.8,depth:[0.6,0.95]},
+  {kind:'gold',color:'#ffd54f',points:200,speed:3.5,size:28,danger:false,weight:0.4,depth:[0.7,0.95]}
+];
+
+const GAME_TIME=60;
+
+// ==== STATE ====
+const game={
+  playing:false,rafId:null,lastTime:0,frame:0,
+  score:0,catches:0,lives:3,time:GAME_TIME,
+  maxDepth:0,best:0,shake:0,
+  hookX:0,hookY:0,hookTargetY:0,
+  fishes:[],bubbles:[],particles:[],floats:[],
+  keys:{up:false,down:false}
+};
+
+// ==== SPAWN ====
+function spawnFish(){
+  const total=FISH_TYPES.reduce((s,f)=>s+f.weight,0);
+  let r=Math.random()*total;
+  let type=FISH_TYPES[0];
+  for(const ft of FISH_TYPES){r-=ft.weight;if(r<=0){type=ft;break}}
+  const yMin=type.depth[0]*H, yMax=type.depth[1]*H;
+  const y=yMin+Math.random()*(yMax-yMin);
+  const fromRight=Math.random()<0.7;
+  game.fishes.push({
+    type:type,
+    x:fromRight?W+type.size:-type.size,
+    y:y,
+    dir:fromRight?-1:1,
+    speed:type.speed*(0.8+Math.random()*0.4),
+    wobble:Math.random()*PI2
+  });
+}
+function spawnBubble(){
+  game.bubbles.push({x:Math.random()*W,y:H+10,r:2+Math.random()*4,s:0.5+Math.random(),w:Math.random()*PI2});
+}
+
+// ==== UPDATE ====
+function update(dt){
+  game.frame++;
+  game.time-=dt;
+  if(game.time<=0){game.time=0;endGame();return}
+
+  // крючок плавно к цели
+  game.hookY+=(game.hookTargetY-game.hookY)*0.15;
+  if(game.keys.up)game.hookTargetY-=7;
+  if(game.keys.down)game.hookTargetY+=7;
+  game.hookTargetY=Math.max(30,Math.min(H-30,game.hookTargetY));
+  game.hookY=Math.max(30,Math.min(H-30,game.hookY));
+
+  // спавн
+  if(game.frame%40===0)spawnFish();
+  if(game.fishes.length<4)spawnFish();
+  if(game.frame%15===0)spawnBubble();
+
+  // рыбы
+  for(let i=game.fishes.length-1;i>=0;i--){
+    const f=game.fishes[i];
+    f.x+=f.dir*f.speed*dt*60;
+    f.wobble+=0.05*dt*60;
+    f.y+=Math.sin(f.wobble)*0.4;
+    if((f.dir<0&&f.x<-80)||(f.dir>0&&f.x>W+80))game.fishes.splice(i,1);
+  }
+  // пузырьки
+  for(let i=game.bubbles.length-1;i>=0;i--){
+    const b=game.bubbles[i];
+    b.y-=b.s*dt*60;b.w+=0.05;b.x+=Math.sin(b.w)*0.3;
+    if(b.y<-10)game.bubbles.splice(i,1);
+  }
+  // частицы/текст
+  for(let i=game.particles.length-1;i>=0;i--){
+    const p=game.particles[i];
+    p.x+=p.vx*dt*60;p.y+=p.vy*dt*60;p.life-=dt*1.2;
+    if(p.life<=0)game.particles.splice(i,1);
+  }
+  for(let i=game.floats.length-1;i>=0;i--){
+    const f=game.floats[i];
+    f.y+=f.vy*dt;f.life-=dt*0.8;
+    if(f.life<=0)game.floats.splice(i,1);
+  }
+
+  checkCatch();
+
+  if(game.shake>0){game.shake*=0.9;if(game.shake<0.5)game.shake=0}
+  if(game.frame%10===0)updateHUD();
+}
+
+function checkCatch(){
+  for(let i=game.fishes.length-1;i>=0;i--){
+    const f=game.fishes[i];
+    const d=Math.hypot(f.x-game.hookX,f.y-game.hookY);
+    if(d<f.type.size*0.7+12){
+      if(f.type.danger){
+        game.lives--;game.shake=12;SFX.danger();
+        burst(f.x,f.y,'#ff5555',14);
+        float(f.x,f.y,'ОПАСНО!','#ff6b8a',20);
+        game.fishes.splice(i,1);
+        updateHUD();
+        if(game.lives<=0)endGame();
+      }else{
+        game.score+=f.type.points;
+        game.catches++;
+        if(f.type.points>game.best)game.best=f.type.points;
+        if(f.type.points>=100){SFX.big();burst(f.x,f.y,'#ffd700',18);float(f.x,f.y,'+'+f.type.points,'#ffd700',24);}
+        else{SFX.catch();burst(f.x,f.y,'#00ff9d',8);float(f.x,f.y,'+'+f.type.points,'#00ff9d',16);}
+        game.fishes.splice(i,1);
+        updateHUD();
+      }
+      return;
+    }
+  }
+}
+
+function burst(x,y,c,n){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*PI2,s=2+Math.random()*4;
+    game.particles.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,size:2+Math.random()*3,color:c});
+  }
+}
+function float(x,y,t,c,s){game.floats.push({x:x,y:y,text:t,color:c,size:s,life:1,vy:-40})}
+
+// ==== DRAW ====
+function drawBackground(){
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#0a4a6e');g.addColorStop(0.5,'#053050');g.addColorStop(1,'#000a18');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  // лучи
+  ctx.save();ctx.globalAlpha=0.06;ctx.fillStyle='#80d0ff';
+  for(let i=0;i<5;i++){
+    const x=(W/6)*(i+1)+Math.sin(performance.now()*0.0003+i)*30;
+    ctx.beginPath();ctx.moveTo(x-20,0);ctx.lineTo(x+20,0);ctx.lineTo(x+80,H*0.6);ctx.lineTo(x-80,H*0.6);ctx.closePath();ctx.fill();
+  }
+  ctx.restore();
+  // водоросли
+  ctx.strokeStyle='rgba(0,150,100,.3)';ctx.lineWidth=3;
+  for(let i=0;i<8;i++){
+    const bx=(W/9)*(i+1),sw=Math.sin(performance.now()*0.001+i)*15;
+    ctx.beginPath();ctx.moveTo(bx,H);ctx.quadraticCurveTo(bx+sw,H-60,bx+sw*1.5,H-100);ctx.stroke();
+  }
+}
+
+function drawFish(f){
+  ctx.save();
+  ctx.translate(f.x,f.y);
+  if(f.dir>0)ctx.scale(-1,1);
+  const s=f.type.size,c=f.type.color;
+  ctx.fillStyle=c;
+
+  if(f.type.kind==='fish'){
+    ctx.beginPath();ctx.ellipse(0,0,s*0.6,s*0.35,0,0,PI2);ctx.fill();
+    ctx.beginPath();ctx.moveTo(-s*0.5,0);ctx.lineTo(-s*0.85,-s*0.3);ctx.lineTo(-s*0.85,s*0.3);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(s*0.3,-s*0.08,s*0.1,0,PI2);ctx.fill();
+    ctx.fillStyle='#000';ctx.beginPath();ctx.arc(s*0.32,-s*0.08,s*0.05,0,PI2);ctx.fill();
+  }
+  else if(f.type.kind==='shark'){
+    ctx.beginPath();ctx.ellipse(0,0,s*0.7,s*0.3,0,0,PI2);ctx.fill();
+    ctx.beginPath();ctx.moveTo(-s*0.1,-s*0.25);ctx.lineTo(s*0.1,-s*0.65);ctx.lineTo(s*0.3,-s*0.25);ctx.closePath();ctx.fill();
+    ctx.beginPath();ctx.moveTo(-s*0.6,0);ctx.lineTo(-s*0.95,-s*0.35);ctx.lineTo(-s*0.95,s*0.35);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#ffeb3b';ctx.beginPath();ctx.arc(s*0.45,-s*0.06,s*0.07,0,PI2);ctx.fill();
+  }
+  else if(f.type.kind==='mine'){
+    ctx.beginPath();ctx.arc(0,0,s*0.4,0,PI2);ctx.fill();
+    ctx.strokeStyle=c;ctx.lineWidth=3;
+    for(let i=0;i<8;i++){
+      const a=(i/8)*PI2;
+      ctx.beginPath();ctx.moveTo(Math.cos(a)*s*0.4,Math.sin(a)*s*0.4);ctx.lineTo(Math.cos(a)*s*0.62,Math.sin(a)*s*0.62);ctx.stroke();
+    }
+    ctx.fillStyle='#ff1744';ctx.beginPath();ctx.arc(0,0,s*0.13,0,PI2);ctx.fill();
+  }
+  else if(f.type.kind==='octo'){
+    ctx.beginPath();ctx.arc(0,-s*0.1,s*0.4,0,PI2);ctx.fill();
+    ctx.strokeStyle=c;ctx.lineWidth=3;
+    for(let i=0;i<4;i++){
+      const ox=-s*0.3+i*s*0.2;
+      ctx.beginPath();ctx.moveTo(ox,s*0.1);ctx.quadraticCurveTo(ox+Math.sin(f.wobble*2+i)*6,s*0.4,ox,s*0.6);ctx.stroke();
+    }
+    ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(-s*0.13,-s*0.15,s*0.09,0,PI2);ctx.arc(s*0.13,-s*0.15,s*0.09,0,PI2);ctx.fill();
+  }
+  else if(f.type.kind==='gold'){
+    ctx.shadowBlur=15;ctx.shadowColor='#ffd700';
+    ctx.beginPath();ctx.ellipse(0,0,s*0.55,s*0.32,0,0,PI2);ctx.fill();
+    ctx.beginPath();ctx.moveTo(-s*0.45,0);ctx.lineTo(-s*0.8,-s*0.3);ctx.lineTo(-s*0.8,s*0.3);ctx.closePath();ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.fillStyle='#fff2a0';
+    ctx.beginPath();ctx.moveTo(-s*0.15,-s*0.3);ctx.lineTo(-s*0.1,-s*0.52);ctx.lineTo(0,-s*0.36);ctx.lineTo(s*0.1,-s*0.52);ctx.lineTo(s*0.15,-s*0.3);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#000';ctx.beginPath();ctx.arc(s*0.28,-s*0.06,s*0.05,0,PI2);ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawHook(){
+  const hx=game.hookX,hy=game.hookY;
+  ctx.strokeStyle='rgba(220,240,250,.6)';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(hx,0);ctx.lineTo(hx,hy-14);ctx.stroke();
+  // яркий крючок
+  ctx.strokeStyle='#ffffff';ctx.lineWidth=4;ctx.lineCap='round';
+  ctx.beginPath();ctx.arc(hx,hy,12,0,Math.PI*1.3);ctx.stroke();
+  ctx.save();ctx.globalAlpha=0.2;ctx.fillStyle='#00e5ff';
+  ctx.beginPath();ctx.arc(hx,hy,24,0,PI2);ctx.fill();ctx.restore();
+  // глубина
+  const depth=Math.floor((hy/H)*50);
+  if(depth>game.maxDepth)game.maxDepth=depth;
+  ctx.fillStyle='rgba(0,229,255,.6)';ctx.font='12px Courier New';ctx.textAlign='left';
+  ctx.fillText(depth+'m',hx+22,hy);
+}
+
+function draw(){
+  drawBackground();
+  ctx.save();
+  if(game.shake>0)ctx.translate((Math.random()-0.5)*game.shake,(Math.random()-0.5)*game.shake);
+  // пузырьки
+  for(const b of game.bubbles){
+    ctx.strokeStyle='rgba(150,220,240,.3)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,PI2);ctx.stroke();
+  }
+  // рыбы
+  for(const f of game.fishes)drawFish(f);
+  // крючок
+  drawHook();
+  // частицы
+  for(const p of game.particles){
+    ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle=p.color;
+    ctx.beginPath();ctx.arc(p.x,p.y,p.size*p.life,0,PI2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  // текст
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  for(const f of game.floats){
+    ctx.globalAlpha=Math.max(0,f.life);ctx.fillStyle=f.color;
+    ctx.font='bold '+f.size+'px Segoe UI, Arial';
+    ctx.fillText(f.text,f.x,f.y);
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+}
+
+// ==== HUD ====
+function updateHUD(){
+  scoreVal.textContent=game.score;
+  catchVal.textContent=game.catches;
+  livesVal.textContent=game.lives>0?'❤️'.repeat(game.lives):'💀';
+  timeVal.textContent=Math.ceil(game.time);
+}
+
+// ==== FLOW ====
+function startGame(){
+  initAudio();
+  btnStart.blur();btnRestart.blur();
+  startMenu.classList.add('hidden');
+  overMenu.classList.add('hidden');
+  game.playing=true;game.frame=0;
+  game.score=0;game.catches=0;game.lives=3;game.time=GAME_TIME;
+  game.maxDepth=0;game.best=0;game.shake=0;
+  game.fishes=[];game.bubbles=[];game.particles=[];game.floats=[];
+  resize();
+  game.hookY=H*0.4;game.hookTargetY=game.hookY;
+  for(let i=0;i<5;i++)spawnFish();
+  updateHUD();
+  if(game.rafId)cancelAnimationFrame(game.rafId);
+  game.lastTime=performance.now();
+  game.rafId=requestAnimationFrame(loop);
+}
+function endGame(){
+  game.playing=false;SFX.over();
+  finalScore.textContent=game.score;
+  finalCatch.textContent=game.catches;
+  finalDepth.textContent=game.maxDepth;
+  bestCatch.textContent='+'+game.best;
+  setTimeout(function(){overMenu.classList.remove('hidden')},400);
+}
+function loop(now){
+  if(!game.playing)return;
+  let dt=(now-game.lastTime)/1000;
+  if(!isFinite(dt)||dt<0)dt=0;
+  if(dt>0.05)dt=0.05;
+  game.lastTime=now;
+  try{
+    update(dt);
+    draw();
+  }catch(err){
+    ctx.fillStyle='#ff5555';ctx.font='16px Courier New';ctx.textAlign='center';
+    ctx.fillText('ERROR: '+err.message,W/2,H/2);
+    return;
+  }
+  game.rafId=requestAnimationFrame(loop);
+}
+
+// ==== INPUT ====
+window.addEventListener('mousemove',function(e){
+  if(game.playing)game.hookTargetY=e.clientY;
+});
+window.addEventListener('touchmove',function(e){
+  e.preventDefault();
+  if(game.playing)game.hookTargetY=e.touches[0].clientY;
+},{passive:false});
+window.addEventListener('touchstart',function(e){
+  if(game.playing)game.hookTargetY=e.touches[0].clientY;
+},{passive:true});
+window.addEventListener('keydown',function(e){
+  if(e.code==='Space')e.preventDefault();
+  if(e.code==='ArrowUp'){e.preventDefault();game.keys.up=true}
+  if(e.code==='ArrowDown'){e.preventDefault();game.keys.down=true}
+});
+window.addEventListener('keyup',function(e){
+  if(e.code==='ArrowUp')game.keys.up=false;
+  if(e.code==='ArrowDown')game.keys.down=false;
+});
+btnStart.addEventListener('click',startGame);
+btnRestart.addEventListener('click',startGame);
+
+resize();
+drawBackground();
+</script>
+</body>
+</html>
